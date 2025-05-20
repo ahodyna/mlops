@@ -1,5 +1,5 @@
 [core]
     remote = storage
 ['remote "storage"']
-    url = s3://cars-dvc-storage
+    url = s3://dogs-dvc-storage
     endpointurl = http://localhost:9000
