@@ -52,3 +52,4 @@ wandb
 minio-data
 postgres-data
 mydata
+/dataset
