@@ -53,3 +53,22 @@ minio-data
 postgres-data
 mydata
 /dataset
+
+/dataset_numbered
+
+venv/
+
+# Моделі
+*.pt
+yolov8*.pt
+
+# Cache
+.cache/
+.cache/**
+
+# Тимчасові файли тренування  
+runs/
+dataset_numbered_split.yaml
+
+# MLFlow
+mlruns/

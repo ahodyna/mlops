@@ -1,0 +1,10 @@
+path: dataset_numbered
+train: images  
+val: images 
+
+# Класи
+nc: 1 
+names: 
+  0: Dog 
+
+download: False

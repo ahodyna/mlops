@@ -1,0 +1,7 @@
+# Dataset for dog detection training
+path: dataset_numbered
+train: images
+val: images
+nc: 1
+names:
+  0: dog
