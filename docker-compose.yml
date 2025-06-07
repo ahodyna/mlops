@@ -12,7 +12,7 @@ services:
     volumes:
       - ./minio-data:/data
     networks: [appnet]
-    
+   
   db:
     image: pgautoupgrade/pgautoupgrade:13-alpine
     hostname: db
@@ -29,12 +29,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    
+   
   mlflow:
     image: python:3.9-slim
     hostname: mlflow
     restart: unless-stopped
-    depends_on: 
+    depends_on:
       db:
         condition: service_healthy
       minio:
@@ -56,7 +56,7 @@ services:
     volumes:
       - ./scripts:/scripts
     networks: [appnet]
-    
+   
   app:
     image: heartexlabs/label-studio:latest  
     build: .                                
@@ -77,6 +77,28 @@ services:
       - ./mydata:/label-studio/data
     command: label-studio-uwsgi
     networks: [appnet]
-    
+
+  dog-detection-api:
+    build:
+      context: ./dog-detection-api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - mlflow
+      - minio
+    ports:
+      - "8001:8000"
+    environment:
+      MLFLOW_URI: http://mlflow:5000
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: mlflow-artifacts
+      PYTHONUNBUFFERED: 1
+    volumes:
+      - ./test_images:/app/test_images
+      - ./inference_results:/app/inference_results
+    networks: [appnet]
+   
 networks:
   appnet:

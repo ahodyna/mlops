@@ -32,8 +32,7 @@ class YOLODogInference:
         self.minio_bucket = minio_bucket
         self.confidence_threshold = confidence_threshold
         self.iou_threshold = iou_threshold
-        
-        # Налаштування MinIO
+    
         os.environ['AWS_ACCESS_KEY_ID'] = minio_access_key
         os.environ['AWS_SECRET_ACCESS_KEY'] = minio_secret_key
         os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
@@ -46,7 +45,7 @@ class YOLODogInference:
             secure=False
         )
         
-        # MLFlow налаштування
+       
         mlflow.set_tracking_uri(mlflow_tracking_uri)
         mlflow.set_experiment("dog_detection_yolov8_v2")
         
@@ -95,9 +94,7 @@ class YOLODogInference:
             return None
     
     def get_latest_model(self):
-        """Отримує найновішу натреновану модель"""
         try:
-            # Спочатку спробуємо через MLFlow
             experiment = mlflow.get_experiment_by_name("dog_detection_yolov8_v2")
             if experiment is not None:
                 runs = mlflow.search_runs(
@@ -107,7 +104,6 @@ class YOLODogInference:
                 )
                 
                 if not runs.empty:
-                    # Шукаємо в колонках параметрів
                     for _, run in runs.iterrows():
                         for param_name in ['params.best_model_minio_path', 'params.last_model_minio_path']:
                             if param_name in run and pd.notna(run[param_name]):
@@ -117,7 +113,6 @@ class YOLODogInference:
                                     print(f"🎯 Знайдена модель через MLFlow: {best_model_path}")
                                     return best_model_path
             
-            # Якщо MLFlow не спрацював, знаходимо найновішу модель напряму з MinIO
             print("🔍 MLFlow не знайшов модель, шукаємо найновішу в MinIO...")
             models = []
             objects = self.minio_client.list_objects(self.minio_bucket, prefix="models/", recursive=True)
@@ -127,7 +122,6 @@ class YOLODogInference:
                     models.append((obj.object_name, obj.last_modified))
             
             if models:
-                # Сортуємо за часом створення (найновіша першою)
                 models.sort(key=lambda x: x[1], reverse=True)
                 latest_model = models[0][0]
                 print(f"🎯 Знайдена найновіша модель в MinIO: {latest_model}")
@@ -141,23 +135,20 @@ class YOLODogInference:
             return None
     
     def load_model(self, model_path: str = None):
-        """Завантажує модель для інференсу"""
         try:
             if model_path is None:
-                # Спробуємо знайти останню модель
                 model_path = self.get_latest_model()
                 if model_path is None:
                     print("❌ Не вдалося знайти натреновану модель")
                     return None
             
-            # Якщо це шлях до MinIO, завантажуємо модель
+            
             if not os.path.exists(model_path):
                 local_model_path = self.download_model_from_minio(model_path)
                 if local_model_path is None:
                     return None
                 model_path = local_model_path
             
-            # Завантажуємо модель YOLO
             model = YOLO(model_path)
             print(f"✅ Модель завантажена: {model_path}")
             return model
@@ -174,15 +165,13 @@ class YOLODogInference:
             print(f"❌ Папка {test_dir} не знайдена")
             return []
         
-        # Підтримувані формати
         supported_formats = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff', '*.webp']
-        image_files = set()  # Використовуємо set для уникнення дублікатів
+        image_files = set()
         
         for format_pattern in supported_formats:
             image_files.update(test_path.glob(format_pattern))
             image_files.update(test_path.glob(format_pattern.upper()))
         
-        # Конвертуємо назад у список та сортуємо
         image_files = sorted(list(image_files))
         
         print(f"📸 Знайдено {len(image_files)} тестових зображень в {test_dir}")
@@ -194,13 +183,11 @@ class YOLODogInference:
     def run_inference_on_image(self, model, image_path: Path, save_results: bool = True):
         """Виконує інференс на одному зображенні"""
         try:
-            # Завантажуємо зображення
             image = cv2.imread(str(image_path))
             if image is None:
                 print(f"❌ Не вдалося завантажити зображення: {image_path}")
                 return None
             
-            # Виконуємо детекцію
             results = model(
                 str(image_path),
                 conf=self.confidence_threshold,
@@ -208,7 +195,6 @@ class YOLODogInference:
                 verbose=False
             )
             
-            # Обробляємо результати
             detections = []
             result = results[0]
             
@@ -225,21 +211,17 @@ class YOLODogInference:
                         'class_name': 'dog'
                     })
             
-            # Зберігаємо результат з візуалізацією
             if save_results and detections:
                 output_dir = Path("inference_results")
                 output_dir.mkdir(exist_ok=True)
                 
-                # Малюємо bounding boxes
                 annotated_image = image.copy()
                 for det in detections:
                     x1, y1, x2, y2 = det['bbox']
                     conf = det['confidence']
                     
-                    # Малюємо прямокутник
                     cv2.rectangle(annotated_image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
                     
-                    # Додаємо текст
                     label = f"dog: {conf:.2f}"
                     label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
                     cv2.rectangle(annotated_image, (int(x1), int(y1) - label_size[1] - 10),
@@ -247,7 +229,6 @@ class YOLODogInference:
                     cv2.putText(annotated_image, label, (int(x1), int(y1) - 5),
                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
                 
-                # Зберігаємо результат
                 output_path = output_dir / f"result_{image_path.name}"
                 cv2.imwrite(str(output_path), annotated_image)
                 
@@ -266,23 +247,19 @@ class YOLODogInference:
     def run_batch_inference(self, model_path: str = None, test_dir: str = "test_images", save_results: bool = True):
         """Виконує інференс на всіх зображеннях з тестової папки"""
         
-        # Завантажуємо модель
         model = self.load_model(model_path)
         if model is None:
             return None
         
-        # Підготовуємо тестові зображення
         image_files = self.prepare_test_images(test_dir)
         if not image_files:
             return None
         
-        # Створюємо папку для результатів
         if save_results:
             results_dir = Path("inference_results")
             results_dir.mkdir(exist_ok=True)
             print(f"📁 Результати будуть збережені в: {results_dir}")
         
-        # Виконуємо інференс
         all_results = []
         total_detections = 0
         
@@ -307,7 +284,6 @@ class YOLODogInference:
             else:
                 print(f"  ❌ Помилка обробки")
         
-        # Зберігаємо статистику
         if save_results and all_results:
             results_file = Path("inference_results") / "inference_summary.json"
             summary = {
@@ -326,7 +302,6 @@ class YOLODogInference:
             
             print(f"\n📊 Збережено звіт: {results_file}")
         
-        # Виводимо підсумки
         print("\n" + "=" * 50)
         print("📈 ПІДСУМКИ ІНФЕРЕНСУ")
         print("=" * 50)
@@ -342,7 +317,6 @@ class YOLODogInference:
         return all_results
     
     def test_single_image(self, image_path: str, model_path: str = None):
-        """Тестує одне зображення"""
         model = self.load_model(model_path)
         if model is None:
             return None
@@ -383,7 +357,6 @@ def main():
     print("🔍 YOLOv8 Dog Detection Inference")
     print("=" * 50)
     
-    # Ініціалізуємо інференс
     inference = YOLODogInference(
         mlflow_tracking_uri=args.mlflow_uri,
         minio_endpoint=args.minio_endpoint,
@@ -394,15 +367,12 @@ def main():
     
     try:
         if args.list_models:
-            # Показуємо доступні моделі
             inference.list_available_models()
         
         elif args.single_image:
-            # Тестуємо одне зображення
             inference.test_single_image(args.single_image, args.model)
         
         else:
-            # Батч інференс
             save_results = not args.no_save
             results = inference.run_batch_inference(
                 model_path=args.model,

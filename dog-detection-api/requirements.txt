@@ -20,3 +20,7 @@ rich>=13.0.0
 pyyaml>=6.0
 ultralytics
 minio
+python-multipart
+fastapi
+aiofiles
+uvicorn[standard]
