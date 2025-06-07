@@ -72,3 +72,5 @@ dataset_numbered_split.yaml
 
 # MLFlow
 mlruns/
+
+test_images/
