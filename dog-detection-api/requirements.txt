@@ -24,3 +24,5 @@ python-multipart
 fastapi
 aiofiles
 uvicorn[standard]
+evidently
+prometheus-client

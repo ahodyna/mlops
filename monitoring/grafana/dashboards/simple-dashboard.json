@@ -1,0 +1,163 @@
+{
+  "id": null,
+  "title": "Dog Detection API Dashboard",
+  "tags": ["dog-detection"],
+  "style": "dark",
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "schemaVersion": 30,
+  "version": 1,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Загальна кількість передбачень",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(dog_predictions_total)",
+          "legendFormat": "Total Predictions",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": 0},
+              {"color": "yellow", "value": 10},
+              {"color": "red", "value": 100}
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-main"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Собак знайдено (всього)",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 0},
+      "targets": [
+        {
+          "expr": "dogs_detected_total",
+          "legendFormat": "Dogs Detected",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "palette-classic"}
+        }
+      },
+      "options": {
+        "colorMode": "background"
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-main"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Середній час обробки",
+      "type": "gauge",
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 0},
+      "targets": [
+        {
+          "expr": "rate(dog_processing_seconds_sum[5m]) / rate(dog_processing_seconds_count[5m])",
+          "legendFormat": "Avg Time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "max": 10,
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": 0},
+              {"color": "yellow", "value": 2},
+              {"color": "red", "value": 5}
+            ]
+          }
+        }
+      },
+      "options": {},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-main"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Передбачення за часом",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+      "targets": [
+        {
+          "expr": "dog_predictions_total",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "palette-classic"}
+        }
+      },
+      "options": {},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-main"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Статуси запитів",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+      "targets": [
+        {
+          "expr": "sum by (status) (dog_predictions_total)",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"}
+        }
+      },
+      "options": {},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-main"
+      }
+    }
+  ]
+}

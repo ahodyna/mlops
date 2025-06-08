@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import tempfile
@@ -10,6 +10,21 @@ import json
 from datetime import datetime
 import asyncio
 import uvicorn
+import time
+import cv2
+import numpy as np
+import pandas as pd
+
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+
+# Evidently для drift detection
+try:
+    from evidently.report import Report
+    from evidently.metrics import DatasetDriftMetric
+    EVIDENTLY_AVAILABLE = True
+except ImportError:
+    EVIDENTLY_AVAILABLE = False
+    print("⚠️ Evidently не встановлено. Drift detection недоступний.")
 
 from yolo_inference import YOLODogInference
 
@@ -27,7 +42,81 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+predictions_total = Counter('dog_predictions_total', 'Total predictions made', ['status'])
+
+# Час обробки
+processing_time = Histogram(
+    'dog_processing_seconds', 
+    'Time spent processing images',
+    buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+)
+
+dogs_detected = Counter('dogs_detected_total', 'Total dogs detected')
+
+class SimpleDriftMonitor:
+    def __init__(self):
+        self.reference_data = []
+        self.current_batch = []
+        self.batch_size = 20
+        
+    def extract_features(self, image_data, processing_time, dogs_count):
+        """Витягує прості ознаки з зображення"""
+        nparr = np.frombuffer(image_data, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if img is not None:
+            return {
+                'width': img.shape[1],
+                'height': img.shape[0],
+                'brightness': float(np.mean(img)),
+                'processing_time': processing_time,
+                'dogs_count': dogs_count
+            }
+        return None
+    
+    def add_sample(self, image_data, processing_time, dogs_count):
+        """Додає зразок для аналізу"""
+        features = self.extract_features(image_data, processing_time, dogs_count)
+        if features:
+            self.current_batch.append(features)
+            
+            if len(self.current_batch) >= self.batch_size:
+                self.check_drift()
+                self.current_batch = []
+    
+    def set_reference_data(self):
+        if self.current_batch:
+            self.reference_data = self.current_batch.copy()
+            print(f"✅ Встановлено {len(self.reference_data)} еталонних зразків")
+    
+    def check_drift(self):   
+        if not EVIDENTLY_AVAILABLE or not self.reference_data:
+            return
+            
+        try:
+            ref_df = pd.DataFrame(self.reference_data)
+            curr_df = pd.DataFrame(self.current_batch)
+            
+            report = Report(metrics=[DatasetDriftMetric()])
+            report.run(reference_data=ref_df, current_data=curr_df)
+            
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            report_path = f"drift_report_{timestamp}.html"
+            report.save_html(report_path)
+            
+            results = report.as_dict()
+            drift_detected = results['metrics'][0]['result']['dataset_drift']
+            
+            if drift_detected:
+                print(f"🚨 ВИЯВЛЕНО ДРІФТ! Звіт збережено: {report_path}")
+            else:
+                print(f"✅ Дріфт не виявлено. Звіт: {report_path}")
+                
+        except Exception as e:
+            print(f"❌ Помилка перевірки дріфту: {e}")
+
 inference_service = None
+drift_monitor = SimpleDriftMonitor()
 
 @app.on_event("startup")
 async def startup_event():
@@ -65,7 +154,9 @@ async def root():
             "health": "/health",
             "models": "/models",
             "predict": "/predict",
-            "batch_predict": "/batch-predict"
+            "batch_predict": "/batch-predict",
+            "metrics": "/metrics",
+            "drift_baseline": "/set-drift-baseline"
         }
     }
 
@@ -77,6 +168,17 @@ async def health_check():
         "timestamp": datetime.now().isoformat(),
         "service": "dog-detection-api"
     }
+
+@app.get("/metrics")
+async def get_metrics():
+    """Prometheus метрики"""
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+@app.post("/set-drift-baseline")
+async def set_drift_baseline():
+    """Встановлює поточні дані як еталонні для drift detection"""
+    drift_monitor.set_reference_data()
+    return {"message": "Еталонні дані встановлені", "timestamp": datetime.now().isoformat()}
 
 @app.get("/models")
 async def list_models():
@@ -102,10 +204,16 @@ async def predict_single_image(
 ):
     """Інференс на одному зображенні"""
     
+    start_time = time.time()
+    
     if not file.content_type.startswith('image/'):
+        predictions_total.labels(status='error').inc()
         raise HTTPException(status_code=400, detail="Файл повинен бути зображенням")
     
     try:
+        image_data = await file.read()
+        file.file.seek(0)
+        
         with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file.filename}") as temp_file:
             shutil.copyfileobj(file.file, temp_file)
             temp_path = temp_file.name
@@ -115,6 +223,7 @@ async def predict_single_image(
         
         model = inference_service.load_model(model_path)
         if model is None:
+            predictions_total.labels(status='error').inc()
             raise HTTPException(status_code=500, detail="Не вдалося завантажити модель")
         
         result = inference_service.run_inference_on_image(
@@ -126,18 +235,29 @@ async def predict_single_image(
         os.unlink(temp_path)
         
         if result is None:
+            predictions_total.labels(status='error').inc()
             raise HTTPException(status_code=500, detail="Помилка обробки зображення")
+        
+        process_time = time.time() - start_time
+        processing_time.observe(process_time)
+        predictions_total.labels(status='success').inc()
+        dogs_detected.inc(result['detection_count'])
+        
+        # Додаємо до drift monitoring
+        drift_monitor.add_sample(image_data, process_time, result['detection_count'])
         
         return {
             "filename": file.filename,
             "detections": result['detections'],
             "detection_count": result['detection_count'],
+            "processing_time": process_time,
             "confidence_threshold": confidence,
             "iou_threshold": iou,
             "timestamp": datetime.now().isoformat()
         }
         
     except Exception as e:
+        predictions_total.labels(status='error').inc()
         if 'temp_path' in locals():
             try:
                 os.unlink(temp_path)
@@ -155,18 +275,23 @@ async def batch_predict(
     """Batch інференс на декількох зображеннях"""
     
     if len(files) > 10:
+        predictions_total.labels(status='error').inc()
         raise HTTPException(status_code=400, detail="Максимум 10 файлів за раз")
     
     for file in files:
         if not file.content_type.startswith('image/'):
+            predictions_total.labels(status='error').inc()
             raise HTTPException(status_code=400, detail=f"Файл {file.filename} не є зображенням")
     
     try:
+        start_time = time.time()
+        
         inference_service.confidence_threshold = confidence
         inference_service.iou_threshold = iou
         
         model = inference_service.load_model(model_path)
         if model is None:
+            predictions_total.labels(status='error').inc()
             raise HTTPException(status_code=500, detail="Не вдалося завантажити модель")
         
         results = []
@@ -190,12 +315,17 @@ async def batch_predict(
                     "detections": result['detections'],
                     "detection_count": result['detection_count']
                 })
+                dogs_detected.inc(result['detection_count'])
         
         for temp_path in temp_files:
             try:
                 os.unlink(temp_path)
             except:
                 pass
+        
+        process_time = time.time() - start_time
+        processing_time.observe(process_time)
+        predictions_total.labels(status='success').inc()
         
         total_detections = sum(r['detection_count'] for r in results)
         images_with_dogs = len([r for r in results if r['detection_count'] > 0])
@@ -207,6 +337,7 @@ async def batch_predict(
                 "processed_images": len(results),
                 "total_detections": total_detections,
                 "images_with_dogs": images_with_dogs,
+                "processing_time": process_time,
                 "confidence_threshold": confidence,
                 "iou_threshold": iou,
                 "timestamp": datetime.now().isoformat()
@@ -214,6 +345,7 @@ async def batch_predict(
         }
         
     except Exception as e:
+        predictions_total.labels(status='error').inc()
         if 'temp_files' in locals():
             for temp_path in temp_files:
                 try:
@@ -234,6 +366,7 @@ async def get_stats():
         },
         "system_info": {
             "python_version": os.sys.version,
+            "evidently_available": EVIDENTLY_AVAILABLE,
             "timestamp": datetime.now().isoformat()
         }
     }
