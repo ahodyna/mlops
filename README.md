@@ -12,6 +12,7 @@
 - **💾 Сховище**: MinIO - S3-сумісне сховище для даних та артефактів
 - **🔧 Версіонування даних**: DVC - контроль версій датасетів
 - **🚀 API**: FastAPI - REST API для інференсу моделі
+- **📈 Моніторинг**: Prometheus + Grafana - метрики та візуалізація
 - **🐳 Оркестрація**: Docker Compose - контейнеризація всіх сервісів
 
 ## 1. Запустіть docker-compose файл:
@@ -23,6 +24,9 @@
 
 - **Label Studio**: [http://localhost:8080](http://localhost:8080)  
 - **MLflow**: [http://localhost:5001](http://localhost:5001)
+- **Prometheus**: [http://localhost:9090](http://localhost:9090)  
+- **Grafana**: [http://localhost:3000](http://localhost:3000)
+- **Dog Detection API**: [http://localhost:8001](http://localhost:8001)
 - **MinIO**: [http://localhost:9009](http://localhost:9009)  
   > 🔐 Дані для входу вказані у `docker-compose.yml`.
 
@@ -198,6 +202,11 @@ curl -X POST "http://localhost:8001/batch-predict" \
 ```
 
 ---
+
+### Prometheus + Grafana
+- **Метрики API**: `dog_predictions_total`, `dog_processing_seconds`, `dogs_detected_total`
+- **Дашборд**: "Dog Detection API Dashboard" у Grafana
+
 
 ## 🔮 Подальше використання
 - Дані будуть використані для навчання та тестування моделі, яка дозволить автоматично виявляти собаку на нових фото.
