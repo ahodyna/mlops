@@ -1,0 +1,205 @@
+name: 🐕 Dog Detection CI/CD Pipeline
+
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'dog-detection-api/**'
+      - 'src/train_yolo.py'              
+      - 'dog-detection-api/requirements.txt'
+      - 'docker-compose.yml'
+  workflow_dispatch:
+    inputs:
+      train_model:
+        description: '🎯 Запустити тренування моделі'
+        type: boolean
+        default: false
+      epochs:
+        description: '📊 Кількість епох'
+        type: string
+        default: '5'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/dog-detection-api
+
+jobs:
+  # =================== ТРЕНУВАННЯ ===================
+  train-model:
+    name: 🎯 Train Model
+    runs-on: ubuntu-latest
+    if: github.event.inputs.train_model == 'true'
+    timeout-minutes: 60
+    
+    steps:
+    - name: 📥 Checkout
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        cache: 'pip'
+        cache-dependency-path: 'dog-detection-api/requirements.txt'
+        
+    - name: 📦 Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r dog-detection-api/requirements.txt 
+        
+    - name: 🏗️ Start MLflow
+      run: |
+        echo "MINIO_ROOT_USER=minioadmin" > .env
+        echo "MINIO_ROOT_PASSWORD=minioadmin123" >> .env
+        docker-compose up -d minio db mlflow
+        sleep 30
+        
+    - name: 📊 Create test dataset
+      run: |
+        mkdir -p dataset_test/images dataset_test/labels
+        python -c "
+        import cv2, numpy as np
+        for i in range(10):
+            img = np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8)
+            cv2.rectangle(img, (200, 200), (400, 500), (100, 50, 200), -1)
+            cv2.imwrite(f'dataset_test/images/dog_{i:03d}.jpg', img)
+            with open(f'dataset_test/labels/dog_{i:03d}.txt', 'w') as f:
+                f.write('0 0.5 0.4 0.3 0.5\n')
+        "
+        cat > dataset_test.yaml << EOF
+        path: $(pwd)/dataset_test
+        train: images
+        val: images
+        nc: 1
+        names: [dog]
+        EOF
+        
+    - name: 🎯 Train model
+      run: |
+        python src/train_yolo.py \ 
+          --model yolov8n.pt \
+          --epochs ${{ github.event.inputs.epochs || '5' }} \
+          --imgsz 416 \
+          --batch 2 \
+          --name "ci_test_$(date +%Y%m%d_%H%M%S)" \
+          --mlflow_uri http://localhost:5001
+          
+    - name: 📤 Upload results
+      uses: actions/upload-artifact@v3
+      with:
+        name: training-results
+        path: runs/
+        retention-days: 7
+
+  # =================== BUILD & TEST ===================
+  build-and-test:
+    name: 🐳 Build & Test
+    runs-on: ubuntu-latest
+    needs: [train-model]
+    if: always() && (needs.train-model.result == 'success' || needs.train-model.result == 'skipped')
+    
+    steps:
+    - name: 📥 Checkout
+      uses: actions/checkout@v4
+      
+    - name: 🐳 Setup Docker
+      uses: docker/setup-buildx-action@v3
+      
+    - name: 🔑 Login to Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: 🏷️ Generate tags
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest
+          
+    - name: 🔨 Build and push
+      uses: docker/build-push-action@v5
+      with:
+        context: ./dog-detection-api 
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: 🧪 Test image
+      run: |
+        # Тест Docker image
+        docker run -d --name test-api -p 8002:8000 \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        
+        sleep 20
+        
+        # Health check
+        if curl -f http://localhost:8002/health; then
+          echo "✅ API тест пройдено!"
+        else
+          echo "❌ API тест провалено"
+          docker logs test-api
+          exit 1
+        fi
+        
+        docker stop test-api && docker rm test-api
+
+  # =================== DEPLOY ===================
+  deploy:
+    name: 🚀 Deploy
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+    if: github.ref == 'refs/heads/master' && success()
+    
+    steps:
+    - name: 📥 Checkout
+      uses: actions/checkout@v4
+      
+    - name: 🚀 Deploy stack
+      run: |
+        echo "MINIO_ROOT_USER=minioadmin" > .env
+        echo "MINIO_ROOT_PASSWORD=minioadmin123" >> .env
+        
+        # Використовуємо новий Docker image
+        export API_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+        
+        # Модифікуємо docker-compose для production
+        sed "s|build:|image: $API_IMAGE #build:|g" docker-compose.yml > docker-compose.prod.yml
+        sed -i "/context:/d; /dockerfile:/d" docker-compose.prod.yml
+        
+        # Запускаємо
+        docker-compose -f docker-compose.prod.yml up -d
+        sleep 45
+        
+    - name: 🔍 Health checks
+      run: |
+        echo "🔍 Перевірка deployment..."
+        
+        # API health check
+        for i in {1..5}; do
+          if curl -f http://localhost:8001/health; then
+            echo "✅ API готове!"
+            break
+          fi
+          echo "Спроба $i/5..."
+          sleep 10
+        done
+        
+        # Перевірка інших сервісів
+        curl -f http://localhost:5001/ && echo "✅ MLflow готовий!"
+        curl -f http://localhost:3000/ && echo "✅ Grafana готовий!"
+        
+    - name: 📊 Summary
+      run: |
+        echo "🎉 Deployment успішний!"
+        echo "🔗 API: http://localhost:8001"
+        echo "📊 MLflow: http://localhost:5001"  
+        echo "📈 Grafana: http://localhost:3000"
+        echo "🏷️ Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
