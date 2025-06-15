@@ -115,7 +115,6 @@ class SimpleDriftMonitor:
         except Exception as e:
             print(f"❌ Помилка перевірки дріфту: {e}")
 
-# Global services - оголошуємо тут, до використання!
 inference_service = None
 drift_monitor = SimpleDriftMonitor()
 
