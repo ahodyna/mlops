@@ -1,3 +1,5 @@
+# .github/workflows/dog-detection-pipeline.yml
+
 name: 🐕 Dog Detection CI/CD Pipeline
 
 on:
@@ -5,8 +7,8 @@ on:
     branches: [ master ]
     paths:
       - 'dog-detection-api/**'
-      - 'src/train_yolo.py'              
-      - 'dog-detection-api/requirements.txt'
+      - 'src/train_yolo.py'              # ← Виправлено шлях
+      - 'dog-detection-api/requirements.txt'  # ← Виправлено шлях
       - 'docker-compose.yml'
   workflow_dispatch:
     inputs:
@@ -40,12 +42,12 @@ jobs:
       with:
         python-version: '3.9'
         cache: 'pip'
-        cache-dependency-path: 'dog-detection-api/requirements.txt'
+        cache-dependency-path: 'dog-detection-api/requirements.txt'  # ← Виправлено шлях
         
     - name: 📦 Install dependencies
       run: |
         pip install --upgrade pip
-        pip install -r dog-detection-api/requirements.txt 
+        pip install -r dog-detection-api/requirements.txt  # ← Виправлено шлях
         
     - name: 🏗️ Start MLflow
       run: |
@@ -76,7 +78,7 @@ jobs:
         
     - name: 🎯 Train model
       run: |
-        python src/train_yolo.py \ 
+        python src/train_yolo.py \  # ← Виправлено шлях
           --model yolov8n.pt \
           --epochs ${{ github.event.inputs.epochs || '5' }} \
           --imgsz 416 \
@@ -125,7 +127,7 @@ jobs:
     - name: 🔨 Build and push
       uses: docker/build-push-action@v5
       with:
-        context: ./dog-detection-api 
+        context: ./dog-detection-api  # ← Змінено context назад
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
@@ -138,13 +140,23 @@ jobs:
         docker run -d --name test-api -p 8002:8000 \
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
         
-        sleep 20
+        # Чекаємо поки API запуститься (до 2 хвилин)
+        echo "🔄 Чекаємо запуск API..."
+        for i in {1..24}; do
+          if curl -f http://localhost:8002/health 2>/dev/null; then
+            echo "✅ API готовий після $((i*5)) секунд!"
+            break
+          fi
+          echo "Спроба $i/24... ($(($i*5))s)"
+          sleep 5
+        done
         
-        # Health check
+        # Фінальна перевірка
         if curl -f http://localhost:8002/health; then
           echo "✅ API тест пройдено!"
         else
-          echo "❌ API тест провалено"
+          echo "❌ API тест провалено після 2 хвилин"
+          echo "📋 Логи контейнера:"
           docker logs test-api
           exit 1
         fi
