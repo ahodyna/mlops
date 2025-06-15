@@ -33,7 +33,7 @@ jobs:
   train:
     name: 🎯 Train Model
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.train_new_model == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    if: ${{ github.event.inputs.train_new_model == 'true' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) }}
     
     steps:
     - name: Checkout code
@@ -132,14 +132,14 @@ jobs:
         echo "- **Status**: ✅ COMPLETED" >> $GITHUB_STEP_SUMMARY
         echo "- **Model**: YOLOv8n" >> $GITHUB_STEP_SUMMARY
         echo "- **Epochs**: 10" >> $GITHUB_STEP_SUMMARY
-        echo "- **Trigger**: ${{ github.event_name == 'push' && 'Auto (Push to main)' || 'Manual' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Trigger**: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) && 'Auto (Push to main/master)' || 'Manual' }}" >> $GITHUB_STEP_SUMMARY
         echo "- **MLflow**: http://localhost:5001" >> $GITHUB_STEP_SUMMARY
         echo "- **Experiment**: dog_detection_yolov8_v2" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "🚀 **Next**: Model will be automatically built into Docker image and deployed!" >> $GITHUB_STEP_SUMMARY
         
     - name: Upload trained model
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: trained-model
         path: runs/detect/ci_training/weights/best.pt
@@ -156,9 +156,16 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
+    - name: Debug job dependencies
+      run: |
+        echo "Train job result: ${{ needs.train.result }}"
+        echo "Event name: ${{ github.event_name }}"
+        echo "Ref: ${{ github.ref }}"
+        echo "Should download artifact: ${{ needs.train.result == 'success' }}"
+      
     - name: Download trained model
       if: needs.train.result == 'success'
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: trained-model
         path: ./model/
@@ -168,10 +175,29 @@ jobs:
         mkdir -p dog-detection-api/models
         
         if [ -f "model/best.pt" ]; then
-          echo "Using newly trained model"
+          echo "✅ Using newly trained model"
           cp model/best.pt dog-detection-api/models/
+          echo "MODEL_SOURCE=newly_trained" >> $GITHUB_ENV
         else
-          echo "Using existing model or base YOLO"
+          echo "⚠️ No newly trained model found, checking for existing model..."
+          
+          # Check for existing trained models in the repo
+          if find . -name "best.pt" -type f 2>/dev/null | head -1; then
+            existing_model=$(find . -name "best.pt" -type f | head -1)
+            echo "✅ Found existing model: $existing_model"
+            cp "$existing_model" dog-detection-api/models/best.pt
+            echo "MODEL_SOURCE=existing" >> $GITHUB_ENV
+          else
+            echo "ℹ️ Using base YOLO model"
+            echo "MODEL_SOURCE=base_yolo" >> $GITHUB_ENV
+          fi
+        fi
+        
+        echo "📁 Docker context contents:"
+        ls -la dog-detection-api/
+        if [ -d "dog-detection-api/models" ]; then
+          echo "📁 Models directory:"
+          ls -la dog-detection-api/models/
         fi
         
     - name: Login to GitHub Container Registry
@@ -211,12 +237,13 @@ jobs:
         
     - name: Add build info to summary
       run: |
-        echo "## Docker Build Completed" >> $GITHUB_STEP_SUMMARY
+        echo "## 🐳 Docker Build Completed" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "Docker image has been built and tested successfully." >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "- **Image**: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
-        echo "- **Size**: Built and tested" >> $GITHUB_STEP_SUMMARY
+        echo "- **Model Source**: ${{ env.MODEL_SOURCE || 'unknown' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Train Job**: ${{ needs.train.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Tests**: API endpoints verified" >> $GITHUB_STEP_SUMMARY
 
   # =================== DEPLOY ===================
@@ -224,7 +251,7 @@ jobs:
     name: 🚀 Deploy
     runs-on: ubuntu-latest
     needs: [build]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     environment:
       name: production
       url: http://localhost:8001
@@ -278,6 +305,6 @@ jobs:
         echo "- **Image**: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Environment**: Production" >> $GITHUB_STEP_SUMMARY
-        echo "- **Auto-deployed**: ✅ Yes (triggered by push to main)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Auto-deployed**: ✅ Yes (triggered by push to main/master)" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "🎉 **Your CI/CD pipeline is working! Push → Train → Deploy complete!**" >> $GITHUB_STEP_SUMMARY

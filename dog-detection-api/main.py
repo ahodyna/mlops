@@ -122,7 +122,7 @@ drift_monitor = SimpleDriftMonitor()
 @app.on_event("startup")
 async def startup_event():
     """Ініціалізація сервісу при запуску - test"""
-    global inference_service  # ← Тепер global ПЕРЕД використанням
+    global inference_service 
     
     # Перевіряємо чи це CI/CD середовище
     is_ci = os.getenv("CI", "false").lower() == "true"
