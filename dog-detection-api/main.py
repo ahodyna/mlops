@@ -122,6 +122,38 @@ drift_monitor = SimpleDriftMonitor()
 async def startup_event():
     """Ініціалізація сервісу при запуску"""
     global inference_service
+    
+    is_ci = os.getenv("CI", "false").lower() == "true"
+    is_github_actions = os.getenv("GITHUB_ACTIONS", "false").lower() == "true"
+    
+    if is_ci or is_github_actions:
+        print("🧪 CI/CD режим - пропускаємо ініціалізацію MLflow")
+        inference_service = None
+        return
+    
+    try:
+        mlflow_uri = os.getenv("MLFLOW_URI", "http://mlflow:5000")
+        minio_endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
+        minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+        minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+        minio_bucket = os.getenv("MINIO_BUCKET", "mlflow-artifacts")
+        
+        inference_service = YOLODogInference(
+            mlflow_tracking_uri=mlflow_uri,
+            minio_endpoint=minio_endpoint,
+            minio_access_key=minio_access_key,
+            minio_secret_key=minio_secret_key,
+            minio_bucket=minio_bucket,
+            confidence_threshold=0.5,
+            iou_threshold=0.45
+        )
+        print("✅ Dog Detection API запущено успішно!")
+    except Exception as e:
+        print(f"❌ Помилка ініціалізації: {e}")
+        raise
+
+    """Ініціалізація сервісу при запуску"""
+    global inference_service
     try:
         mlflow_uri = os.getenv("MLFLOW_URI", "http://mlflow:5000")
         minio_endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")

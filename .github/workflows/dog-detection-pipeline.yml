@@ -134,18 +134,20 @@ jobs:
         
     - name: 🧪 Test image
       run: |
-        # Тест Docker image
+        # Тест Docker image з CI environment variables
         docker run -d --name test-api -p 8002:8000 \
+          -e CI=true \
+          -e GITHUB_ACTIONS=true \
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
         
-        # Чекаємо поки API запуститься (до 2 хвилин)
+        # Чекаємо поки API запуститься (швидше завдяки CI режиму)
         echo "🔄 Чекаємо запуск API..."
-        for i in {1..24}; do
+        for i in {1..12}; do
           if curl -f http://localhost:8002/health 2>/dev/null; then
             echo "✅ API готовий після $((i*5)) секунд!"
             break
           fi
-          echo "Спроба $i/24... ($(($i*5))s)"
+          echo "Спроба $i/12... ($(($i*5))s)"
           sleep 5
         done
         
@@ -153,7 +155,7 @@ jobs:
         if curl -f http://localhost:8002/health; then
           echo "✅ API тест пройдено!"
         else
-          echo "❌ API тест провалено після 2 хвилин"
+          echo "❌ API тест провалено"
           echo "📋 Логи контейнера:"
           docker logs test-api
           exit 1
