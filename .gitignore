@@ -78,3 +78,24 @@ test_images/
 inference_results/
 
 models/
+
+.secrets
+
+.env.act
+
+
+# Act-cli та секрети
+.env.act
+.env.local
+act_secrets/
+.actrc.local
+
+# CI/CD artifacts  
+deployment_info.json
+training.log
+*.log
+
+# Docker volumes
+minio-data/
+postgres-data/
+mydata/
