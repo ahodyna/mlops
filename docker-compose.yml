@@ -1,5 +1,4 @@
 version: '3.8'
-
 services:
   minio:
     image: "minio/minio:${MINIO_VERSION:-RELEASE.2025-04-22T22-12-26Z}"
@@ -87,7 +86,9 @@ services:
       - "9090:9090"
     volumes:
       - prometheus-data:/prometheus
+      - ./monitoring/prometheus:/etc/prometheus:ro
     command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=200h'
       - '--web.enable-lifecycle'
@@ -100,7 +101,7 @@ services:
       - "3000:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_PASSWORD: password123
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana-data:/var/lib/grafana
@@ -133,7 +134,6 @@ services:
    
 networks:
   appnet:
-
 volumes:
   prometheus-data:
   grafana-data:

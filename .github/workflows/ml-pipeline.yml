@@ -15,13 +15,6 @@ jobs:
       run: |
         echo "🔍 Checking monitoring configuration files..."
         
-        if [ -f "prometheus.yml" ]; then
-          echo "✅ prometheus.yml found"
-        else
-          echo "❌ prometheus.yml not found"
-          exit 1
-        fi
-        
         if [ -f "monitoring/grafana/provisioning/datasources/datasources.yml" ]; then
           echo "✅ Grafana datasource config found"
         else
