@@ -384,7 +384,7 @@ async def batch_predict(
 
 @app.get("/stats")
 async def get_stats():
-    """Статистика сервісу"""
+    """Статистика сервісу - test"""
     return {
         "service": "dog-detection-api",
         "model_info": {

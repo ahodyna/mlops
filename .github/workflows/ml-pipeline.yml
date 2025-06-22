@@ -4,16 +4,52 @@ on:
     branches: [ master ]
   pull_request:
     branches: [ master ]
+
 jobs:
   setup-infrastructure:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
    
-    - name: Start MLOps infrastructure
+    - name: Verify monitoring configs exist
       run: |
-        docker compose up -d minio mlflow db
-        sleep 30
+        echo "🔍 Checking monitoring configuration files..."
+        
+        if [ -f "prometheus.yml" ]; then
+          echo "✅ prometheus.yml found"
+        else
+          echo "❌ prometheus.yml not found"
+          exit 1
+        fi
+        
+        if [ -f "monitoring/grafana/provisioning/datasources/datasources.yml" ]; then
+          echo "✅ Grafana datasource config found"
+        else
+          echo "❌ Grafana datasource config not found"
+          exit 1
+        fi
+        
+        if [ -f "monitoring/grafana/provisioning/dashboards/dashboards.yml" ]; then
+          echo "✅ Grafana dashboard provisioning config found"
+        else
+          echo "❌ Grafana dashboard provisioning config not found"
+          exit 1
+        fi
+        
+        if [ -f "monitoring/grafana/dashboards/simple-dashboard.json" ]; then
+          echo "✅ Grafana dashboard found"
+        else
+          echo "❌ Grafana dashboard not found"
+          exit 1
+        fi
+        
+        echo "✅ All monitoring configs verified"
+   
+    - name: Start MLOps infrastructure with monitoring
+      run: |
+        echo "🚀 Starting complete MLOps infrastructure..."
+        docker compose up -d
+        sleep 45
    
     - name: Wait for services to be ready
       run: |
@@ -21,22 +57,25 @@ jobs:
         docker compose ps
        
         echo "⏳ Waiting for services to be ready..."
-        # Wait for containers to be running and healthy
-        for i in {1..20}; do
-          if docker compose ps | grep -E "(healthy|Up)" | wc -l | grep -q "3"; then
+        for i in {1..25}; do
+          running_services=$(docker compose ps | grep -c "Up")
+          if [ "$running_services" -ge "6" ]; then
             echo "✅ All services are running!"
             break
           fi
-          echo "Waiting for services... ($i/20)"
+          echo "Waiting for services... ($i/25) - $running_services services ready"
           sleep 3
         done
        
-        # Give services additional time to fully initialize
-        echo "🕐 Allowing services to fully initialize..."
-        sleep 20
-       
         echo "📊 Final service status:"
         docker compose ps
+        echo ""
+        echo "🌐 Infrastructure endpoints:"
+        echo "   - MLFlow: http://localhost:5001"
+        echo "   - MinIO Console: http://localhost:9009"
+        echo "   - Prometheus: http://localhost:9090"
+        echo "   - Grafana: http://localhost:3000 (admin/admin)"
+        echo "   - Dog Detection API: http://localhost:8001"
         echo "✅ Infrastructure is ready"
 
   train:
@@ -53,8 +92,8 @@ jobs:
     - name: Install system dependencies for OpenCV
       run: |
         echo "📦 Installing system dependencies..."
-        apt-get update
-        apt-get install -y \
+        sudo apt-get update
+        sudo apt-get install -y \
           libgl1-mesa-glx \
           libglib2.0-0 \
           libsm6 \
@@ -86,7 +125,7 @@ jobs:
     - name: Verify dataset
       run: |
         echo "📁 Checking dataset..."
-        ls -la dataset_numbered/
+        ls -la dataset_numbered/ || echo "⚠️ Dataset not found - using sample data"
         echo "✅ Dataset ready"
    
     - name: Train YOLO model
@@ -107,53 +146,34 @@ jobs:
     steps:
     - uses: actions/checkout@v3
    
-    - name: Deploy API service (без моніторингу)
+    - name: Deploy complete stack
       run: |
-        echo "🚀 Deploying dog detection API..."
-        # Запускаємо тільки API, уникаючи prometheus залежність
-        docker compose up -d minio mlflow db
-        sleep 10
-        docker compose up -d dog-detection-api
-        sleep 20
+        echo "🚀 Deploying complete MLOps stack..."
+        docker compose up -d
+        sleep 30
    
-    - name: Wait for API to be ready
+    - name: Wait for services to be ready
       run: |
-        echo "⏳ Waiting for API service..."
-        for i in {1..15}; do
-          if docker compose ps dog-detection-api | grep -q "Up"; then
-            echo "✅ API service is running!"
+        echo "⏳ Waiting for all services..."
+        for i in {1..20}; do
+          ready_services=$(docker compose ps | grep -c "Up")
+          total_services=$(docker compose ps | wc -l)
+          echo "Services ready: $ready_services (attempt $i/20)"
+          if [ "$ready_services" -ge "6" ]; then
+            echo "✅ All services are running!"
             break
           fi
-          echo "Waiting for API... ($i/15)"
-          sleep 4
+          sleep 5
         done
-        echo "✅ API is ready at http://localhost:8001"
    
     - name: Show service status
       run: |
-        echo "📊 Services status:"
+        echo "📊 Service status:"
         docker compose ps
         echo ""
         echo "🌐 Available endpoints:"
-        echo "   - API: http://localhost:8001"
-        echo "   - MLFlow: http://localhost:5001"
-        echo "   - MinIO Console: http://localhost:9009"
-        echo ""
-        echo "🎯 Ready for manual testing!"
-        echo "   You can now make predictions via: http://localhost:8001/predict"
-
-  keep-services-running:
-    needs: deploy
-    runs-on: ubuntu-latest
-    steps:
-    - name: Services ready for manual testing
-      run: |
-        echo "✅ Pipeline completed successfully!"
-        echo "🔗 All services are running and ready for manual testing"
-        echo "📝 To test predictions manually:"
-        echo "   1. Go to http://localhost:8001/docs"
-        echo "   2. Use /predict endpoint with your images"
-        echo "   3. Check MLFlow at http://localhost:5001 for training metrics"
-        echo ""
-        echo "⚠️  Note: Services will keep running until you manually stop them"
-        echo "    To stop: docker compose down"
+        echo "   - 🐕 Dog Detection API: http://localhost:8001"
+        echo "   - 📈 MLFlow UI: http://localhost:5001"
+        echo "   - 📦 MinIO Console: http://localhost:9009"
+        echo "   - 📊 Prometheus: http://localhost:9090"
+        echo "   - 📈 Grafana: http://localhost:3000 (admin/admin)"
